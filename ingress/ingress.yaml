@@ -11,7 +11,7 @@ kind: Ingress
 metadata:
   name: jenkins-devops
   annotations:
-    networking.gke.io/managed-certificates: "jenkins-devops"
+    networking.gke.io/managed-certificates: "devops-monitorings"
     networking.gke.io/v1beta1.FrontendConfig: "http-redirect-https"
 spec:
   rules:

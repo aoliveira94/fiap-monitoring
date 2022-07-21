@@ -4,17 +4,17 @@ variable "region" {
 }
 variable "project" {
   type    = string
-  default = "infra-324113"
+  default = "You Project"
 }
 
 variable "email" {
   type    = string
-  default = "adriano.muniz@outlook.com.br"
+  default = "You Email"
 }
 
 variable "credentials" {
   type    = string
-  default = "~/.config/gcloud/application_default_credentials.json"
+  default = "You application_default_credentials.json"
 }
 
 variable "vm_intance" {
