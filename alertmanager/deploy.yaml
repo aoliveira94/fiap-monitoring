@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alertmanager
+  labels:
+    app: alertmanager
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: alertmanager
+  template:
+    metadata:
+      labels:
+        app: alertmanager
+    spec:
+      restartPolicy: Always
+      containers:
+        - name: alertmanager
+          image: prom/alertmanager:v0.21.0
+          args:
+            - "--config.file=/etc/alertmanager/alertmanager.yml"
+            - "--storage.path=/alertmanager/"
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 9093
+          readinessProbe:
+            initialDelaySeconds: 5
+            successThreshold: 1
+            periodSeconds: 5
+            httpGet:
+              path: /#/status
+              port: 9093
+          livenessProbe:
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 3
+            httpGet:
+              path: /#/status
+              port: 9093
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "50Mi"
+            limits:
+              cpu: "100m"
+              memory: "100Mi"
+          volumeMounts:
+            - name: alertmanager-config
+              mountPath: /etc/alertmanager/alertmanager.yml
+              subPath: alertmanager.yml
+            - name: alertmanager-storage-volume
+              mountPath: /alertmanager/
+      volumes:
+        - name: alertmanager-config
+          configMap:
+            name: alertmanager-config
+            items:
+              - key: alertmanager.yml
+                path: alertmanager.yml
+        - name: alertmanager-storage-volume
+          emptyDir: {}

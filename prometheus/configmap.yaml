@@ -1,0 +1,212 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: default
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+    rule_files:
+      - /etc/prometheus/alert.rules
+    alerting:
+      alertmanagers:
+      - scheme: http
+        static_configs:
+        - targets:
+          - "alertmanager:9093"
+    scrape_configs:
+      - job_name: 'prometheus'
+        scrape_interval: 5s
+        static_configs:
+          - targets: ['prometheus:9090']
+      - job_name: 'alertmanager'
+        scrape_interval: 5s
+        static_configs:
+          - targets: ['alertmanager:9093']
+      - job_name: 'node_exporter'
+        scrape_interval: 5s
+        static_configs:
+          - targets: ['node-exporter:9100']
+      - job_name: 'kubernetes-apiservers'
+        kubernetes_sd_configs:
+        - role: endpoints
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        relabel_configs:
+        - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+          action: keep
+          regex: default;kubernetes;https
+      - job_name: 'kubernetes-nodes'
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        kubernetes_sd_configs:
+        - role: node
+        relabel_configs:
+        - action: labelmap
+          regex: __meta_kubernetes_node_label_(.+)
+        - target_label: __address__
+          replacement: kubernetes.default.svc:443
+        - source_labels: [__meta_kubernetes_node_name]
+          regex: (.+)
+          target_label: __metrics_path__
+          replacement: /api/v1/nodes/${1}/proxy/metrics
+      - job_name: 'kubernetes-pods'
+        kubernetes_sd_configs:
+        - role: pod
+        relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+          action: keep
+          regex: true
+        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+          action: replace
+          target_label: __metrics_path__
+          regex: (.+)
+        - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+          action: replace
+          regex: ([^:]+)(?::\d+)?;(\d+)
+          replacement: $1:$2
+          target_label: __address__
+        - action: labelmap
+          regex: __meta_kubernetes_pod_label_(.+)
+        - source_labels: [__meta_kubernetes_namespace]
+          action: replace
+          target_label: kubernetes_namespace
+        - source_labels: [__meta_kubernetes_pod_name]
+          action: replace
+          target_label: kubernetes_pod_name
+      - job_name: 'kube-state-metrics'
+        static_configs:
+          - targets: ['kube-state-metrics.kube-system.svc.cluster.local:8080']
+      - job_name: 'kubernetes-cadvisor'
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        kubernetes_sd_configs:
+        - role: node
+        relabel_configs:
+        - action: labelmap
+          regex: __meta_kubernetes_node_label_(.+)
+        - target_label: __address__
+          replacement: kubernetes.default.svc:443
+        - source_labels: [__meta_kubernetes_node_name]
+          regex: (.+)
+          target_label: __metrics_path__
+          replacement: /api/v1/nodes/${1}/proxy/metrics/cadvisor
+      - job_name: 'kubernetes-service-endpoints'
+        kubernetes_sd_configs:
+        - role: endpoints
+        relabel_configs:
+        - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scrape]
+          action: keep
+          regex: true
+        - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scheme]
+          action: replace
+          target_label: __scheme__
+          regex: (https?)
+        - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_path]
+          action: replace
+          target_label: __metrics_path__
+          regex: (.+)
+        - source_labels: [__address__, __meta_kubernetes_service_annotation_prometheus_io_port]
+          action: replace
+          target_label: __address__
+          regex: ([^:]+)(?::\d+)?;(\d+)
+          replacement: $1:$2
+        - action: labelmap
+          regex: __meta_kubernetes_service_label_(.+)
+        - source_labels: [__meta_kubernetes_namespace]
+          action: replace
+          target_label: kubernetes_namespace
+        - source_labels: [__meta_kubernetes_service_name]
+          action: replace
+          target_label: kubernetes_name
+  alert.rules: |
+    groups:
+    - name: alerts
+      rules:
+      - alert: KubePodCrashLooping
+        annotations:
+          description: "Pod {{ $labels.namespace }}/{{ $labels.pod }} is restarting {{ $value }} times / 5 minutes."
+          summary: "Pod is crash looping."
+        expr: |
+          increase(kube_pod_container_status_restarts_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+      - alert: KubePodNotReady
+        annotations:
+          description: "Pod {{ $labels.namespace }}/{{ $labels.pod }} has been in a non-ready state for longer than 3 minutes."
+          summary: "Pod has been in a non-ready state for more than 3 minutes."
+        expr: |
+          sum by(namespace, pod) (kube_pod_status_phase{job="kube-state-metrics",phase!~"Running|Succeeded"}) > 0
+        for: 3m
+        labels:
+          severity: warning
+      - alert: KubeContainerWaiting
+        annotations:
+          description: "Pod {{ $labels.namespace }}/{{ $labels.pod }} has been in waiting state for longer than 5 minutes."
+          summary: "Pod container waiting longer than 5 minutes"
+        expr: |
+          sum by (namespace, pod) (kube_pod_container_status_waiting_reason{job="kube-state-metrics"}) > 0
+        for: 5m
+        labels:
+          severity: warning
+      - alert: KubeJobCompletion
+        annotations:
+          description: "Job {{ $labels.namespace }}/{{ $labels.job_name }} is taking more than 6 hours to complete."
+          summary: "Job did not complete in time"
+        expr: |
+          kube_job_spec_completions{job="kube-state-metrics"} - kube_job_status_succeeded{job="kube-state-metrics"}  > 0
+        for: 6h
+        labels:
+          severity: warning
+      - alert: KubeJobFailed
+        annotations:
+          description: "Job {{ $labels.namespace }}/{{ $labels.job_name }} failed to complete. Removing failed job after investigation should clear this alert."
+          summary: "Job failed to complete."
+        expr: |
+          kube_job_failed{job="kube-state-metrics"}  > 0
+        for: 15m
+        labels:
+          severity: warning
+      # - alert: service_down
+      #   expr: up == 0
+      #   for: 1m
+      #   labels:
+      #     severity: critical
+      #   annotations:
+      #     summary: "Instance {{ $labels.instance }} down"
+      #     description: "{{ $labels.instance }} of job {{ $labels.job }} has been down for more than 2 minutes."
+      # - alert: high_load
+      #   expr: node_load1 > 0.5
+      #   for: 1m
+      #   labels:
+      #     severity: critical
+      #   annotations:
+      #     summary: "Instance {{ $labels.instance }} under high load"
+      #     description: "{{ $labels.instance }} of job {{ $labels.job }} is under high load."
+      # - alert: disk_usage
+      #   expr: ceil(((node_filesystem_size_bytes{mountpoint!="/boot"} - node_filesystem_free_bytes{mountpoint!="/boot"}) / node_filesystem_size_bytes{mountpoint!="/boot"} * 100)) > 20
+      #   labels:
+      #     severity: 'critical'
+      #   annotations:
+      #     title: "Disk Usage"
+      #     description: 'Partition : {{$labels.mountpoint}}'
+      #     summary: "Disk usage is `{{humanize $value}}%`"
+      #     host: "{{$labels.instance}}"
+      # - alert: memory_usage
+      #   expr: ceil((((node_memory_MemTotal_bytes - node_memory_MemFree_bytes - node_memory_Buffers_bytes - node_memory_Cached_bytes) / node_memory_MemTotal_bytes) * 100)) > 20
+      #   labels:
+      #     severity: 'critical'
+      #   annotations:
+      #     title: "Memory Usage"
+      #     description: 'Memory usage threshold set to `80%`.'
+      #     summary: "Memory usage is `{{humanize $value}}%`"
+      #     host: "{{$labels.instance}}"

@@ -1,0 +1,37 @@
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: jenkins-devops
+spec:
+  domains:
+    - jenkins-devops.ddns.net
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: jenkins-devops
+  annotations:
+    networking.gke.io/managed-certificates: "jenkins-devops"
+    networking.gke.io/v1beta1.FrontendConfig: "http-redirect-https"
+spec:
+  rules:
+    - host: jenkins-devops.ddns.net
+      http:
+        paths:
+        - path: /
+          pathType: Prefix
+          backend:
+            service:
+              name: jenkins-devops
+              port:
+                number: 8080
+    - host: prometheus-devops.ddns.net
+      http:
+        paths:
+        - pathType: Prefix
+          path: "/"
+          backend:
+            service:
+              name: prometheus
+              port:
+                number: 9090

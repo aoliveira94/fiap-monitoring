@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jenkins-devops
+  labels:
+    app:  jenkins-devops
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app:  jenkins-devops
+  template:
+    metadata:
+      labels:
+        app:  jenkins-devops
+    spec:
+      restartPolicy: Always
+      initContainers:
+        - name: permision
+          image: busybox:latest
+          securityContext:
+            runAsNonRoot: false
+            runAsUser: 0
+            runAsGroup: 0
+          command:
+            - sh
+            - "-c"
+            - |
+              #!/bin/sh
+              chown 1000 -Rf /var/jenkins_home \
+              && \
+              chgrp 1000 -Rf /var/jenkins_home \
+              && \
+              chmod 777 -Rf /var/jenkins_home
+          volumeMounts:
+            - name: jenkins-devops
+              mountPath: "/var/jenkins_home"
+              readOnly: false
+      containers:
+        - name:  jenkins-devops
+          image: jenkins/jenkins:2.360
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http-port
+              containerPort: 8080
+          env:
+            - name: JAVA_OPTS
+              value: "-Dhudson.model.DownloadService.noSignatureCheck=true"
+          readinessProbe:
+            initialDelaySeconds: 20
+            successThreshold: 1
+            periodSeconds: 20
+            httpGet:
+              path: /login
+              port: 8080
+          livenessProbe:
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            successThreshold: 1
+            failureThreshold: 3
+            httpGet:
+              path: /login
+              port: 8080
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "2000Mi"
+            limits:
+              cpu: "1"
+              memory: "4000Mi"
+          volumeMounts:
+            - name: jenkins-devops
+              mountPath: /var/jenkins_home
+      volumes:
+        - name: jenkins-devops
+          persistentVolumeClaim:
+            claimName: jenkins-devops
+
